@@ -18,6 +18,19 @@ using UnityEngine;
 namespace CNSATimeLine
 {
     /// <summary>
+    /// 主菜单诊断入口类。
+    /// 用于确认 KSP AddonLoader 能够正常实例化本模组的类，与 SpaceCentre 入口分离。
+    /// </summary>
+    [KSPAddon(KSPAddon.Startup.MainMenu, false)]
+    public class CNSATimeLineMenuMod : MonoBehaviour
+    {
+        private void Awake()
+        {
+            Debug.Log("[CNSATimeLine] 主菜单诊断入口 Awake - AddonLoader 工作正常。");
+        }
+    }
+
+    /// <summary>
     /// CNSATimeLine 模组太空中心场景入口类。
     /// </summary>
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
