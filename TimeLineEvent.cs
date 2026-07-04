@@ -1,7 +1,8 @@
 /*
  * 文件用途：
  * 本文件定义 CNSATimeLine 模组中时间线事件的数据结构。
- * 每个事件包含真实地球日期时间、事件描述、原始精度标注以及映射到 KSP 全局时间（UT）的秒数。
+ * 每个事件包含真实地球日期时间、本地化键、原始精度标注以及映射到 KSP 全局时间（UT）的秒数。
+ * 事件描述文本不再直接存储，而是通过 LocalizationKey 到 KSP 本地化系统（Localization）中读取。
  *
  * 可调参数：
  * 本类为纯数据容器，无可调运行参数。
@@ -22,7 +23,13 @@ namespace CNSATimeLine
         public DateTime EventDateTime { get; set; }
 
         /// <summary>
-        /// 事件描述文本。
+        /// 事件本地化键，例如 "#CNSATimeLine_Event_YYYYMMDD"。
+        /// 事件描述文本通过此键到 KSP 的 Localization 系统中读取，支持多语言切换。
+        /// </summary>
+        public string LocalizationKey { get; set; }
+
+        /// <summary>
+        /// 事件描述文本（保留字段，可作为本地化失效时的 fallback）。
         /// </summary>
         public string Description { get; set; }
 

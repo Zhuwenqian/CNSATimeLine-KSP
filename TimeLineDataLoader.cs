@@ -1,20 +1,18 @@
 /*
  * 文件用途：
- * 本文件负责读取并解析 `中国航天大事时间线.txt`，将其转换为 TimeLineEvent 列表。
- * 解析时兼容文件中的精度标注行、空行以及装饰性分隔线。
+ * 本文件负责构建中国航天大事时间线事件列表。
+ * 事件的真实日期、本地化键和精度信息硬编码在本类中；事件描述文本不再从 txt 文件读取，
+ * 而是通过 LocalizationKey 到 KSP 的 Localization 系统（Localization/*.cfg）中按当前游戏语言读取。
+ * 这种设计便于支持多语言，且无需在运行时解析外部数据文件。
  *
  * 可调参数：
- * - DataFileRelativePath：相对于 KSP 安装根目录的数据文件路径。
- *   默认 "GameData/CNSATimeLine/中国航天大事时间线.txt"。
- *   修改后可指向其他位置的数据文件。
- * - IgnoreParseErrors：是否忽略解析失败的行。
- *   默认 true；改为 false 时遇到无法识别的行会记录错误并跳过。
+ * - Events：事件元数据数组。增加或删除事件只需修改此数组，
+ *   并同步在 Localization/zh-cn.cfg、en-us.cfg、ru.cfg 中添加对应键值。
+ * - DefaultPrecision：当某个事件未指定精度时使用的默认值。
  */
 
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Text.RegularExpressions;
 using UnityEngine;
 
 namespace CNSATimeLine
@@ -25,129 +23,89 @@ namespace CNSATimeLine
     public static class TimeLineDataLoader
     {
         /// <summary>
-        /// 数据文件相对于 KSP 安装根目录的路径。
-        /// 默认位于 GameData/CNSATimeLine/ 下，与模组 DLL 同级。
+        /// 当事件元数据未提供精度时使用的默认精度本地化键。
         /// </summary>
-        public const string DataFileRelativePath = "GameData/CNSATimeLine/中国航天大事时间线.txt";
+        public const string DefaultPrecision = "#CNSATimeLine_Precision_Day";
 
         /// <summary>
-        /// 是否忽略解析失败的行。
-        /// 使用 static readonly 而非 const，避免编译器将条件判定为不可达代码。
+        /// 事件元数据数组，包含：真实日期时间、本地化键、精度本地化键。
+        /// 增加事件时，请同时更新 Localization 目录下的 zh-cn.cfg / en-us.cfg / ru.cfg。
         /// </summary>
-        public static readonly bool IgnoreParseErrors = true;
+        private static readonly Tuple<DateTime, string, string>[] Events =
+        {
+            Tuple.Create(new DateTime(1956, 10, 08, 0, 0, 0), "#CNSATimeLine_Event_19561008", "#CNSATimeLine_Precision_Day"),
+            Tuple.Create(new DateTime(1970, 04, 24, 21, 35, 44), "#CNSATimeLine_Event_19700424", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(1975, 11, 26, 0, 0, 0), "#CNSATimeLine_Event_19751126", "#CNSATimeLine_Precision_Day"),
+            Tuple.Create(new DateTime(1984, 01, 29, 0, 0, 0), "#CNSATimeLine_Event_19840129", "#CNSATimeLine_Precision_Day"),
+            Tuple.Create(new DateTime(1984, 04, 08, 0, 0, 0), "#CNSATimeLine_Event_19840408", "#CNSATimeLine_Precision_Day"),
+            Tuple.Create(new DateTime(1999, 11, 20, 6, 30, 7), "#CNSATimeLine_Event_19991120", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2000, 10, 31, 0, 0, 0), "#CNSATimeLine_Event_20001031", "#CNSATimeLine_Precision_Day"),
+            Tuple.Create(new DateTime(2003, 05, 25, 0, 0, 0), "#CNSATimeLine_Event_20030525", "#CNSATimeLine_Precision_Day"),
+            Tuple.Create(new DateTime(2003, 10, 15, 9, 0, 0), "#CNSATimeLine_Event_20031015", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2005, 10, 12, 9, 0, 0), "#CNSATimeLine_Event_20051012", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2007, 04, 14, 4, 11, 0), "#CNSATimeLine_Event_20070414", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2007, 10, 24, 18, 5, 4), "#CNSATimeLine_Event_20071024", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2008, 09, 25, 21, 10, 4), "#CNSATimeLine_Event_20080925", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2009, 03, 01, 16, 13, 10), "#CNSATimeLine_Event_20090301", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2010, 10, 01, 18, 59, 57), "#CNSATimeLine_Event_20101001", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2011, 09, 29, 21, 16, 3), "#CNSATimeLine_Event_20110929", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2011, 11, 01, 5, 58, 10), "#CNSATimeLine_Event_20111101", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2012, 06, 16, 18, 37, 24), "#CNSATimeLine_Event_20120616", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2013, 06, 11, 17, 38, 2), "#CNSATimeLine_Event_20130611", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2013, 12, 02, 1, 30, 0), "#CNSATimeLine_Event_20131202", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2016, 09, 15, 22, 4, 12), "#CNSATimeLine_Event_20160915", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2016, 10, 17, 7, 30, 31), "#CNSATimeLine_Event_20161017", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2017, 11, 05, 19, 45, 0), "#CNSATimeLine_Event_20171105", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2018, 12, 08, 2, 23, 0), "#CNSATimeLine_Event_20181208", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2019, 01, 03, 10, 26, 0), "#CNSATimeLine_Event_20190103", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2020, 06, 23, 9, 43, 0), "#CNSATimeLine_Event_20200623", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2020, 07, 23, 12, 41, 15), "#CNSATimeLine_Event_20200723", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2020, 11, 24, 4, 30, 0), "#CNSATimeLine_Event_20201124", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2021, 04, 29, 11, 23, 15), "#CNSATimeLine_Event_20210429", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2021, 05, 22, 10, 40, 0), "#CNSATimeLine_Event_20210522", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2021, 06, 17, 9, 22, 31), "#CNSATimeLine_Event_20210617", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2021, 10, 16, 0, 23, 56), "#CNSATimeLine_Event_20211016", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2022, 06, 05, 10, 44, 10), "#CNSATimeLine_Event_20220605", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2022, 11, 29, 23, 8, 17), "#CNSATimeLine_Event_20221129", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2023, 05, 30, 9, 31, 10), "#CNSATimeLine_Event_20230530", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2023, 10, 26, 11, 14, 2), "#CNSATimeLine_Event_20231026", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2024, 04, 25, 20, 59, 0), "#CNSATimeLine_Event_20240425", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2024, 05, 03, 17, 27, 0), "#CNSATimeLine_Event_20240503", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2024, 06, 25, 14, 7, 0), "#CNSATimeLine_Event_20240625", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2024, 10, 30, 4, 27, 34), "#CNSATimeLine_Event_20241030", "#CNSATimeLine_Precision_Second"),
+            Tuple.Create(new DateTime(2025, 04, 24, 17, 17, 0), "#CNSATimeLine_Event_20250424", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2025, 10, 31, 23, 44, 0), "#CNSATimeLine_Event_20251031", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2025, 11, 25, 12, 11, 0), "#CNSATimeLine_Event_20251125", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2026, 05, 11, 17, 30, 0), "#CNSATimeLine_Event_20260511", "#CNSATimeLine_Precision_Minute"),
+            Tuple.Create(new DateTime(2026, 05, 24, 23, 8, 0), "#CNSATimeLine_Event_20260524", "#CNSATimeLine_Precision_Minute")
+        };
 
         /// <summary>
-        /// 匹配事件主行的正则表达式：YYYY-MM-DD HH:MM:SS | 描述。
+        /// 加载并构建时间线事件列表。
         /// </summary>
-        private static readonly Regex EventLineRegex = new Regex(
-            @"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \| (.*)$",
-            RegexOptions.Compiled);
-
-        /// <summary>
-        /// 匹配精度标注行的正则表达式，例如“【精确到秒】来源：科普中国”。
-        /// </summary>
-        private static readonly Regex PrecisionLineRegex = new Regex(
-            @".*(精确到(?:日|分|秒)).*",
-            RegexOptions.Compiled);
-
-        /// <summary>
-        /// 加载并解析时间线数据。
-        /// </summary>
-        /// <returns>按文件顺序排列的事件列表。</returns>
+        /// <returns>按时间顺序排列的事件列表。</returns>
         public static List<TimeLineEvent> Load()
         {
-            var events = new List<TimeLineEvent>();
-            string filePath = GetDataFilePath();
+            var events = new List<TimeLineEvent>(Events.Length);
 
-            if (!File.Exists(filePath))
+            foreach (Tuple<DateTime, string, string> meta in Events)
             {
-                Debug.LogError(string.Format("[CNSATimeLine] 未找到时间线数据文件: {0}", filePath));
-                return events;
-            }
+                DateTime eventTime = meta.Item1;
+                string localizationKey = meta.Item2;
+                string precision = string.IsNullOrEmpty(meta.Item3) ? DefaultPrecision : meta.Item3;
 
-            try
-            {
-                string[] lines = File.ReadAllLines(filePath);
-                TimeLineEvent lastEvent = null;
-
-                foreach (string rawLine in lines)
+                events.Add(new TimeLineEvent
                 {
-                    string line = rawLine.Trim();
-
-                    // 跳过空行与装饰性分隔线。
-                    if (string.IsNullOrEmpty(line) || line.StartsWith("=") || line.StartsWith("-"))
-                    {
-                        continue;
-                    }
-
-                    // 优先尝试解析事件主行。
-                    Match eventMatch = EventLineRegex.Match(line);
-                    if (eventMatch.Success)
-                    {
-                        string dateTimeStr = eventMatch.Groups[1].Value.Trim();
-                        string description = eventMatch.Groups[2].Value.Trim();
-
-                        DateTime eventTime;
-                        if (DateTime.TryParseExact(
-                            dateTimeStr,
-                            "yyyy-MM-dd HH:mm:ss",
-                            null,
-                            System.Globalization.DateTimeStyles.None,
-                            out eventTime))
-                        {
-                            lastEvent = new TimeLineEvent
-                            {
-                                EventDateTime = eventTime,
-                                Description = description,
-                                Precision = string.Empty,
-                                UtcSeconds = TimeLineConverter.DateTimeToUtcSeconds(eventTime)
-                            };
-                            events.Add(lastEvent);
-                        }
-                        else if (!IgnoreParseErrors)
-                        {
-                            Debug.LogError(string.Format("[CNSATimeLine] 无法解析日期时间: {0}", dateTimeStr));
-                        }
-
-                        continue;
-                    }
-
-                    // 若上一行是事件，则尝试将当前行作为精度标注。
-                    if (lastEvent != null)
-                    {
-                        Match precisionMatch = PrecisionLineRegex.Match(line);
-                        if (precisionMatch.Success)
-                        {
-                            lastEvent.Precision = precisionMatch.Groups[1].Value.Trim();
-                            continue;
-                        }
-                    }
-
-                    // 无法识别的行。
-                    if (!IgnoreParseErrors)
-                    {
-                        Debug.LogWarning(string.Format("[CNSATimeLine] 忽略无法解析的行: {0}", line));
-                    }
-                }
-
-                Debug.Log(string.Format("[CNSATimeLine] 成功加载 {0} 条时间线事件。", events.Count));
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError(string.Format("[CNSATimeLine] 读取时间线数据文件失败: {0}", ex.Message));
+                    EventDateTime = eventTime,
+                    LocalizationKey = localizationKey,
+                    Description = localizationKey,
+                    Precision = precision,
+                    UtcSeconds = TimeLineConverter.DateTimeToUtcSeconds(eventTime)
+                });
             }
 
+            Debug.Log(string.Format("[CNSATimeLine] 已构建 {0} 条时间线事件，使用本地化键读取描述。", events.Count));
             return events;
-        }
-
-        /// <summary>
-        /// 获取数据文件的完整绝对路径。
-        /// 使用 KSPUtil.ApplicationRootPath 作为根目录，兼容 Windows/Linux。
-        /// </summary>
-        /// <returns>数据文件的完整路径。</returns>
-        public static string GetDataFilePath()
-        {
-            return Path.Combine(KSPUtil.ApplicationRootPath, DataFileRelativePath);
         }
     }
 }

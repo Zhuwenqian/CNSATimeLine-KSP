@@ -3,6 +3,8 @@
  * 本文件实现 CNSATimeLine 模组在太空中心（SpaceCentre）场景的 IMGUI 窗口。
  * 窗口通过 Ctrl+L 切换显示/隐藏，列出所有中国航天大事时间线事件，
  * 每个事件旁提供“加速到此时”按钮，点击后将 KSP 全局时间加速到该事件前 10 小时。
+ * 所有可见文本（窗口标题、按钮、提示、事件描述）均通过 KSP 的 Localizer 读取，
+ * 支持根据游戏语言自动切换 zh-cn / en-us / ru 等本地化内容。
  *
  * 可调参数：
  * - ToggleKey：切换窗口可见性的快捷键，默认 KeyCode.L。
@@ -13,6 +15,7 @@
  */
 
 using System.Collections.Generic;
+using KSP.Localization;
 using UnityEngine;
 
 namespace CNSATimeLine
@@ -51,6 +54,31 @@ namespace CNSATimeLine
         /// 窗口唯一标识。
         /// </summary>
         private const int WindowId = 12345001;
+
+        /// <summary>
+        /// UI 文本本地化键：窗口标题。
+        /// </summary>
+        private const string KeyWindowTitle = "#CNSATimeLine_UI_WindowTitle";
+
+        /// <summary>
+        /// UI 文本本地化键：顶部信息标签。
+        /// </summary>
+        private const string KeyHeader = "#CNSATimeLine_UI_Header";
+
+        /// <summary>
+        /// UI 文本本地化键：无事件提示。
+        /// </summary>
+        private const string KeyNoEvents = "#CNSATimeLine_UI_NoEvents";
+
+        /// <summary>
+        /// UI 文本本地化键：关闭窗口按钮。
+        /// </summary>
+        private const string KeyCloseButton = "#CNSATimeLine_UI_CloseButton";
+
+        /// <summary>
+        /// UI 文本本地化键：加速按钮。
+        /// </summary>
+        private const string KeyWarpButton = "#CNSATimeLine_UI_WarpButton";
 
         /// <summary>
         /// 当前显示的事件列表。
@@ -94,7 +122,7 @@ namespace CNSATimeLine
                 WindowId,
                 windowRect,
                 DrawWindowContent,
-                "中国航天大事时间线",
+                Localizer.Format(KeyWindowTitle),
                 GUILayout.Width(windowRect.width),
                 GUILayout.Height(windowRect.height));
         }
@@ -107,12 +135,12 @@ namespace CNSATimeLine
         {
             GUILayout.BeginVertical();
 
-            GUILayout.Label(string.Format("共 {0} 个事件 | 按 Ctrl+L 关闭窗口", events.Count), GUILayout.Height(25));
+            GUILayout.Label(Localizer.Format(KeyHeader, events.Count), GUILayout.Height(25));
             GUILayout.Space(5);
 
             if (events.Count == 0)
             {
-                GUILayout.Label("未加载到任何事件，请检查 GameData/CNSATimeLine/中国航天大事时间线.txt 是否存在。");
+                GUILayout.Label(Localizer.Format(KeyNoEvents));
             }
             else
             {
@@ -129,7 +157,7 @@ namespace CNSATimeLine
             }
 
             GUILayout.Space(5);
-            if (GUILayout.Button("关闭窗口", GUILayout.Height(30)))
+            if (GUILayout.Button(Localizer.Format(KeyCloseButton), GUILayout.Height(30)))
             {
                 isVisible = false;
             }
@@ -151,10 +179,17 @@ namespace CNSATimeLine
 
             // 左侧：事件时间 + 描述。
             GUILayout.BeginVertical(GUILayout.Width(520));
-            GUILayout.Label(evt.ToString(), GUILayout.ExpandWidth(true));
+            string localizedDesc = GetLocalizedDescription(evt);
+            GUILayout.Label(string.Format("{0:yyyy-MM-dd HH:mm:ss} | {1}", evt.EventDateTime, localizedDesc), GUILayout.ExpandWidth(true));
             if (!string.IsNullOrEmpty(evt.Precision))
             {
-                GUILayout.Label(string.Format("  [{0}]", evt.Precision));
+                string precisionText = Localizer.Format(evt.Precision);
+                // 若 Localizer 未找到对应键（返回空或键名本身），直接显示原始内容作为回退。
+                if (string.IsNullOrEmpty(precisionText) || precisionText == evt.Precision)
+                {
+                    precisionText = evt.Precision;
+                }
+                GUILayout.Label(string.Format("  [{0}]", precisionText));
             }
             GUILayout.EndVertical();
 
@@ -163,7 +198,7 @@ namespace CNSATimeLine
             bool canWarp = targetUT > currentUT;
 
             GUI.enabled = canWarp;
-            if (GUILayout.Button("加速到此时", GUILayout.Width(100), GUILayout.Height(40)))
+            if (GUILayout.Button(Localizer.Format(KeyWarpButton), GUILayout.Width(100), GUILayout.Height(40)))
             {
                 WarpToEvent(evt, targetUT);
             }
@@ -171,6 +206,30 @@ namespace CNSATimeLine
 
             GUILayout.EndHorizontal();
             GUILayout.Space(3);
+        }
+
+        /// <summary>
+        /// 获取事件的本地化描述。
+        /// 如果 Localizer 未找到对应键（返回键名本身或空），则回退到 Description 字段。
+        /// </summary>
+        /// <param name="evt">事件对象。</param>
+        /// <returns>本地化后的描述文本。</returns>
+        private string GetLocalizedDescription(TimeLineEvent evt)
+        {
+            if (evt == null || string.IsNullOrEmpty(evt.LocalizationKey))
+            {
+                return evt != null ? evt.Description : string.Empty;
+            }
+
+            string result = Localizer.Format(evt.LocalizationKey);
+
+            // Localizer 未找到键时可能返回空字符串或原始键名，此时使用 Description 回退。
+            if (string.IsNullOrEmpty(result) || result == evt.LocalizationKey)
+            {
+                return evt.Description;
+            }
+
+            return result;
         }
 
         /// <summary>
@@ -186,7 +245,8 @@ namespace CNSATimeLine
                 return;
             }
 
-            Debug.Log(string.Format("[CNSATimeLine] 加速到事件 '{0}' 前 {1} 秒，目标 UT: {2:F2}", evt.Description, WarpAheadSeconds, targetUT));
+            string localizedDesc = GetLocalizedDescription(evt);
+            Debug.Log(string.Format("[CNSATimeLine] 加速到事件 '{0}' 前 {1} 秒，目标 UT: {2:F2}", localizedDesc, WarpAheadSeconds, targetUT));
             TimeWarp.fetch.WarpTo(targetUT);
         }
     }
