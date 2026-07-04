@@ -84,6 +84,10 @@
       <HintPath>$(KSPDllPath)\UnityEngine.UIModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(KSPDllPath)\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
 
     <!-- 系统程序集引用 -->
     <Reference Include="System" />
@@ -99,6 +103,10 @@
 
   <ItemGroup>
     <Compile Include="CNSATimeLineMod.cs" />
+    <Compile Include="TimeLineEvent.cs" />
+    <Compile Include="TimeLineConverter.cs" />
+    <Compile Include="TimeLineDataLoader.cs" />
+    <Compile Include="TimeLineWindow.cs" />
   </ItemGroup>
 
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

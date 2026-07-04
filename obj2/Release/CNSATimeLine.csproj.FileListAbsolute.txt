@@ -1,0 +1,2 @@
+E:\Projects\KSP Mod Workspace\CNSATimeLine\obj2\Release\CNSATimeLine.csproj.AssemblyReference.cache
+E:\Projects\KSP Mod Workspace\CNSATimeLine\obj2\Release\CNSATimeLine.csproj.CoreCompileInputs.cache
