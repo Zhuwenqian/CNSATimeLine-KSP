@@ -3,6 +3,8 @@
  * 本文件实现 CNSATimeLine 模组在太空中心（SpaceCentre）场景的 IMGUI 窗口。
  * 窗口通过 Ctrl+L 切换显示/隐藏，列出所有中国航天大事时间线事件，
  * 每个事件旁提供“加速到此时”按钮，点击后将 KSP 全局时间加速到该事件前 10 小时。
+ * 时间加速采用“两段式”：先 WarpTo 到当前 UT 与目标 UT 的中点，自动存档一次，
+ * 然后再 WarpTo 到最终目标 UT，降低长时间加速出错的损失。
  * 所有可见文本（窗口标题、按钮、提示、事件描述）均通过 KSP 的 Localizer 读取，
  * 支持根据游戏语言自动切换 zh-cn / en-us / ru 等本地化内容。
  *
@@ -12,8 +14,13 @@
  * - WindowRect：窗口初始位置与大小。
  * - WarpAheadSeconds：加速提前量，默认 36000 秒（10 小时）。
  *   修改后会改变点击按钮后到达的目标时间。
+ * - EnableMidWarpSave：是否启用中途自动存档，默认 true。
+ * - MidSaveFileName：中途自动存档文件名（不含 .sfs），默认 "CNSATimeLine_AutoSave"。
+ * - MinMidSaveIntervalSeconds：总加速间隔小于该秒数时跳过中点存档，避免频繁存档。
+ *   默认 60 秒。
  */
 
+using System.Collections;
 using System.Collections.Generic;
 using KSP.Localization;
 using UnityEngine;
@@ -34,6 +41,24 @@ namespace CNSATimeLine
         /// 加速提前量，单位秒。默认 36000 秒 = 10 小时。
         /// </summary>
         public double WarpAheadSeconds = 10.0 * 3600.0;
+
+        /// <summary>
+        /// 是否启用中途自动存档。
+        /// 启用后，长时间加速会先到达中点并自动存档，再继续加速到目标。
+        /// </summary>
+        public bool EnableMidWarpSave = true;
+
+        /// <summary>
+        /// 中途自动存档文件名（不含 .sfs 扩展名）。
+        /// 默认 "CNSATimeLine_AutoSave"，会以覆盖方式写入当前存档目录。
+        /// </summary>
+        public string MidSaveFileName = "CNSATimeLine_AutoSave";
+
+        /// <summary>
+        /// 当总加速间隔小于该秒数时，跳过中点自动存档。
+        /// 避免目标很近时仍执行一次无意义的存档。默认 60 秒。
+        /// </summary>
+        public double MinMidSaveIntervalSeconds = 60.0;
 
         /// <summary>
         /// 窗口初始矩形区域。
@@ -84,6 +109,12 @@ namespace CNSATimeLine
         /// 当前显示的事件列表。
         /// </summary>
         private List<TimeLineEvent> events = new List<TimeLineEvent>();
+
+        /// <summary>
+        /// 是否正在执行分段加速流程。
+        /// 用于防止同时触发多次加速，并在流程中禁用按钮。
+        /// </summary>
+        private bool isWarping = false;
 
         /// <summary>
         /// 初始化窗口数据。
@@ -195,7 +226,7 @@ namespace CNSATimeLine
 
             // 右侧：加速按钮。
             double targetUT = evt.UtcSeconds - WarpAheadSeconds;
-            bool canWarp = targetUT > currentUT;
+            bool canWarp = targetUT > currentUT && !isWarping;
 
             GUI.enabled = canWarp;
             if (GUILayout.Button(Localizer.Format(KeyWarpButton), GUILayout.Width(100), GUILayout.Height(40)))
@@ -234,6 +265,7 @@ namespace CNSATimeLine
 
         /// <summary>
         /// 将时间加速到指定目标 UT。
+        /// 如果启用中途存档且间隔足够大，会拆分为两段加速并在中点自动存档。
         /// </summary>
         /// <param name="evt">目标事件。</param>
         /// <param name="targetUT">目标 UT 秒数。</param>
@@ -246,8 +278,79 @@ namespace CNSATimeLine
             }
 
             string localizedDesc = GetLocalizedDescription(evt);
-            Debug.Log(string.Format("[CNSATimeLine] 加速到事件 '{0}' 前 {1} 秒，目标 UT: {2:F2}", localizedDesc, WarpAheadSeconds, targetUT));
+            Debug.Log(string.Format("[CNSATimeLine] 开始加速到事件 '{0}' 前 {1} 秒，目标 UT: {2:F2}", localizedDesc, WarpAheadSeconds, targetUT));
+
+            double currentUT = Planetarium.GetUniversalTime();
+            double interval = targetUT - currentUT;
+
+            if (!EnableMidWarpSave || interval < MinMidSaveIntervalSeconds)
+            {
+                // 不启用中途存档或间隔太小时，直接一次性加速到目标。
+                TimeWarp.fetch.WarpTo(targetUT);
+                return;
+            }
+
+            // 启用中途存档：启动协程完成分段加速。
+            StartCoroutine(WarpWithMidSaveCR(targetUT));
+        }
+
+        /// <summary>
+        /// 分段加速协程：先加速到中点，自动存档，再加速到最终目标。
+        /// </summary>
+        /// <param name="targetUT">最终目标 UT 秒数。</param>
+        private IEnumerator WarpWithMidSaveCR(double targetUT)
+        {
+            isWarping = true;
+
+            double startUT = Planetarium.GetUniversalTime();
+            double midUT = startUT + (targetUT - startUT) * 0.5;
+
+            Debug.Log(string.Format("[CNSATimeLine] 第一段加速：当前 UT {0:F2} -> 中点 UT {1:F2}", startUT, midUT));
+            TimeWarp.fetch.WarpTo(midUT);
+
+            // 等待第一段加速完成：到达中点附近且 warp 倍率回到 1x。
+            // TimeWarp.CurrentRate 为静态属性，表示当前时间加速倍率，1x 时表示已恢复正常速度。
+            yield return new WaitUntil(() =>
+                Planetarium.GetUniversalTime() >= midUT - 1.0 && TimeWarp.CurrentRate <= 1f);
+
+            // 执行中途自动存档。
+            AutoSaveGame();
+
+            Debug.Log(string.Format("[CNSATimeLine] 第二段加速：中点 UT {0:F2} -> 目标 UT {1:F2}", Planetarium.GetUniversalTime(), targetUT));
             TimeWarp.fetch.WarpTo(targetUT);
+
+            isWarping = false;
+        }
+
+        /// <summary>
+        /// 调用 KSP 的 GamePersistence.SaveGame 在当前存档目录覆盖保存一个自动存档。
+        /// </summary>
+        private void AutoSaveGame()
+        {
+            if (string.IsNullOrEmpty(MidSaveFileName))
+            {
+                Debug.LogWarning("[CNSATimeLine] 未设置 MidSaveFileName，跳过中途存档。");
+                return;
+            }
+
+            try
+            {
+                string saveFolder = HighLogic.SaveFolder;
+                string savedFile = GamePersistence.SaveGame(MidSaveFileName, saveFolder, SaveMode.OVERWRITE);
+
+                if (!string.IsNullOrEmpty(savedFile))
+                {
+                    Debug.Log(string.Format("[CNSATimeLine] 中途自动存档成功：{0}", savedFile));
+                }
+                else
+                {
+                    Debug.LogWarning("[CNSATimeLine] 中途自动存档返回空文件名，可能已存在同名文件且 SaveMode.ABORT。");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError(string.Format("[CNSATimeLine] 中途自动存档失败：{0}", ex.Message));
+            }
         }
     }
 }

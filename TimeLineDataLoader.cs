@@ -3,12 +3,15 @@
  * 本文件负责构建中国航天大事时间线事件列表。
  * 事件的真实日期、本地化键和精度信息硬编码在本类中；事件描述文本不再从 txt 文件读取，
  * 而是通过 LocalizationKey 到 KSP 的 Localization 系统（Localization/*.cfg）中按当前游戏语言读取。
- * 这种设计便于支持多语言，且无需在运行时解析外部数据文件。
+ * 由于事件日期按北京时间（UTC+8）记录，而 KSP/RSS-RO 的全局 UT 显示为 UTC+0，
+ * 本文件在计算 UtcSeconds 时会自动加上 8 小时，使加速目标对应北京时间。
  *
  * 可调参数：
  * - Events：事件元数据数组。增加或删除事件只需修改此数组，
  *   并同步在 Localization/zh-cn.cfg、en-us.cfg、ru.cfg 中添加对应键值。
  * - DefaultPrecision：当某个事件未指定精度时使用的默认值。
+ * - BeijingTimeZoneOffsetHours：北京时间与 UTC+0 的时差，默认 8 小时。
+ *   若改为其他时区的事件，可调整此值；UTC+0 时设为 0。
  */
 
 using System;
@@ -26,6 +29,13 @@ namespace CNSATimeLine
         /// 当事件元数据未提供精度时使用的默认精度本地化键。
         /// </summary>
         public const string DefaultPrecision = "#CNSATimeLine_Precision_Day";
+
+        /// <summary>
+        /// 北京时间与 UTC+0 的时差，单位小时。
+        /// 默认 8 小时；计算 UT 时会加上该小时数，让 RSS-RO 的 UTC+0 时间线对齐到北京时间。
+        /// 若事件日期本身已是 UTC+0，可改为 0。
+        /// </summary>
+        public const double BeijingTimeZoneOffsetHours = 8.0;
 
         /// <summary>
         /// 事件元数据数组，包含：真实日期时间、本地化键、精度本地化键。
@@ -94,13 +104,16 @@ namespace CNSATimeLine
                 string localizationKey = meta.Item2;
                 string precision = string.IsNullOrEmpty(meta.Item3) ? DefaultPrecision : meta.Item3;
 
+                // 将北京时间对应的 UT 加上时区偏移，使 RSS-RO 的 UTC+0 显示对齐到北京时间。
+                DateTime targetTime = eventTime.AddHours(BeijingTimeZoneOffsetHours);
+
                 events.Add(new TimeLineEvent
                 {
                     EventDateTime = eventTime,
                     LocalizationKey = localizationKey,
                     Description = localizationKey,
                     Precision = precision,
-                    UtcSeconds = TimeLineConverter.DateTimeToUtcSeconds(eventTime)
+                    UtcSeconds = TimeLineConverter.DateTimeToUtcSeconds(targetTime)
                 });
             }
 
