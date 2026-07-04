@@ -87,12 +87,13 @@ namespace CNSATimeLine
                         string dateTimeStr = eventMatch.Groups[1].Value.Trim();
                         string description = eventMatch.Groups[2].Value.Trim();
 
+                        DateTime eventTime;
                         if (DateTime.TryParseExact(
                             dateTimeStr,
                             "yyyy-MM-dd HH:mm:ss",
                             null,
                             System.Globalization.DateTimeStyles.None,
-                            out DateTime eventTime))
+                            out eventTime))
                         {
                             lastEvent = new TimeLineEvent
                             {

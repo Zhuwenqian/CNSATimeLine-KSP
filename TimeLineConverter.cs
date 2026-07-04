@@ -69,9 +69,9 @@ namespace CNSATimeLine
                     if (epochField != null)
                     {
                         object value = epochField.GetValue(KSPUtil.dateTimeFormatter);
-                        if (value is DateTime dt)
+                        if (value is DateTime)
                         {
-                            epoch = dt;
+                            epoch = (DateTime)value;
                             reflected = true;
                             Debug.Log(string.Format("[CNSATimeLine] 从 RSSTimeFormatter 读取到 epoch: {0:yyyy-MM-dd}", epoch));
                         }
